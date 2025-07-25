@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "decoder.h": "c",
+        "jpeg.h": "c"
+    }
+}
