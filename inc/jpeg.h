@@ -8,10 +8,21 @@
 typedef unsigned char byte;
 typedef unsigned int uint;
 
+#define QUANTIZATION_TABLE_SZ 64
+#define MAX_QUANTIZATION_TABLES 4
+
+typedef struct Quantization_Table Quantization_Table;
+struct Quantization_Table {
+    uint table[QUANTIZATION_TABLE_SZ];
+    bool valid;
+};
+
 typedef struct Header Header;
 struct Header {
     bool valid;
+    Quantization_Table quantization_tables [MAX_QUANTIZATION_TABLES];
 };
+
 
 // Start of Frame markers, non-differential, Huffman coding
 const byte SOF0 = 0xC0; // Baseline

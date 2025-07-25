@@ -6,4 +6,6 @@
 
 Header* read_JPEG(const char* filename);
 
-void read_APPN(Header* const header, FILE* jpeg);
+void skip_APPN(Header* const header, FILE* jpeg);
+
+void read_quantization_table(Header* header, FILE* jpeg);
