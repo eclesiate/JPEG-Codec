@@ -1,6 +1,6 @@
 .PHONY: all clean
 
-CLFAGS= -Wall -Wextra -std=c11 -pedantic -fsanitize=address -Wswitch=enum
+CLFAGS= -Wall -Wextra -std=c11 -pedantic -fsanitize=address -Wswitch=enum -Wliteral-conversion
 LIBS=
 
 all: bin/decoder #bin/encoder

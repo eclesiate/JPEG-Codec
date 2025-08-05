@@ -9,3 +9,5 @@ Header* read_JPEG(const char* filename);
 void skip_APPN(Header* const header, FILE* jpeg);
 
 void read_quantization_table(Header* header, FILE* jpeg);
+
+void print_header(const Header* const header);
