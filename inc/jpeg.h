@@ -17,11 +17,29 @@ struct Quantization_Table {
     bool valid;
 };
 
+typedef struct Color_Component Color_Component;
+struct Color_Component {
+    byte hor_sampling_factor;
+    byte ver_sampling_factor;
+    byte quantization_table_id;
+    bool used;
+};
+
 typedef struct Header Header;
 struct Header {
     bool valid;
+    byte frame_type;
+    uint height;
+    uint width;
+    byte num_components;
+    bool zero_based;
+
+
+    uint restart_interval;
+    Color_Component color_components[3];
     Quantization_Table quantization_tables [MAX_QUANTIZATION_TABLES];
 };
+
 
 const byte zig_zag_map[] = { // for decoding jpeg quantization tables
     0,   1,  8, 16,  9,  2,  3, 10,
