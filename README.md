@@ -1,6 +1,8 @@
 
 Not done decoder, still need to do dequantization, IDCT, YCbCr to RGB Conversion, and Chroma subsampling.
 
+Also will eventually do arithmetic coding.
+
 JPEG Ideas and Practice
 https://en.wikibooks.org/wiki/JPEG_-_Idea_and_Practice
 
