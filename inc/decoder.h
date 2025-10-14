@@ -1,31 +1,55 @@
+#ifndef DECODER_H
+#define DECODER_H
+
 #include <stdio.h> 
 #include <fcntl.h>
 #include <unistd.h>
 
 #include "jpeg.h"
+#include "bit_reader.h"
+#include "huffman_decoder.h"
+#include "bmp_writer.h"
 
-image* read_JPEG(const char* filename);
+// Read JPEG file and return image with decoded data
+Image* read_JPEG(const char* filename);
 
+// Skip APPN markers
 void skip_APPN(FILE* jpeg);
 
-void read_quantization_table(image* image, FILE* jpeg);
+// Read quantization table
+void read_quantization_table(Image* image, FILE* jpeg);
 
-void print_image(const image* const image);
+// Print frame information
+void print_header(const Image* const image);
 
-void read_sof_marker(image* const image, FILE* jpeg);
+// Read Start of Frame marker
+void read_sof_marker(Image* const image, FILE* jpeg);
 
+// Read next marker from file
 void read_next_marker(FILE* jpeg, byte* marker1, byte* marker2);
 
-void read_restart_interval(image* image, FILE* jpeg);
+// Read restart interval
+void read_restart_interval(Image* image, FILE* jpeg);
 
-void read_huffman_table(image* image, FILE* jpeg);
+// Read Huffman table
+void read_huffman_table(Image* image, FILE* jpeg);
 
-void read_sos_marker(image* image, FILE* jpeg);
+// Read Start of Scan marker
+void read_sos_marker(Image* image, FILE* jpeg);
 
-void print_scan_info(const image* const image);
+// Print scan information
+void print_scan_info(const Image* const image);
 
-void init_image(image* image);
+// Initialize image structure
+void init_image(Image* image);
 
+// Skip comment marker
 void skip_comment(FILE* jpeg);
 
-void skip_unused_marker(FILE* jpeg);
+// Skip unused markers
+void skip_unused_markers(FILE* jpeg);
+
+// Read all scans (including Huffman data)
+void read_scans(Image* image, Bit_Reader* reader);
+
+#endif

@@ -1,6 +1,6 @@
 .PHONY: all clean
 
-CFLAGS= -g -Wall -Wextra -std=c11 -pedantic -Wswitch-enum #-fsanitize=address
+CFLAGS= -g -std=c11 -pedantic -Wswitch-enum #-fsanitize=address
 LIBS=
 
 all: bin/decoder #bin/encoder
@@ -10,7 +10,7 @@ clean:
 
 bin/decoder: src/decoder.c
 	@mkdir -p bin
-	$(CC) $(CFLAGS) -o bin/decoder src/decoder.c $(LIBS)
+	$(CC) $(CFLAGS) -o bin/decoder src/decoder.c src/bit_reader.c src/huffman_decoder.c src/bmp_writer.c $(LIBS)
 
 # bin/encoder: src/encoder.c
 # 	@mkdir -p bin

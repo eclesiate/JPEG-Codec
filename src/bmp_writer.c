@@ -1,0 +1,159 @@
+#include "../inc/bmp_writer.h"
+#include <stdio.h>
+#include <stdlib.h>
+
+// Helper function to write a 4-byte integer in little-endian
+static void put_int(FILE* file, uint value) {
+    fputc((value >> 0) & 0xFF, file);
+    fputc((value >> 8) & 0xFF, file);
+    fputc((value >> 16) & 0xFF, file);
+    fputc((value >> 24) & 0xFF, file);
+}
+
+// Helper function to write a 2-byte short in little-endian
+static void put_short(FILE* file, uint value) {
+    fputc((value >> 0) & 0xFF, file);
+    fputc((value >> 8) & 0xFF, file);
+}
+
+// Clamp value to 0-255 range
+static byte clamp(int value) {
+    if (value < 0) return 0;
+    if (value > 255) return 255;
+    return (byte)value;
+}
+
+void write_bmp(const Image* image, const char* filename) {
+    if (image == NULL || image->blocks == NULL) {
+        fprintf(stderr, "Error - Invalid image data\n");
+        return;
+    }
+    
+    printf("Writing BMP file: %s\n", filename);
+    
+    FILE* outfile = fopen(filename, "wb");
+    if (outfile == NULL) {
+        fprintf(stderr, "Error - Failed to open output file: %s\n", filename);
+        return;
+    }
+    
+    // BMP files require rows to be padded to multiples of 4 bytes
+    const uint padding_size = image->width % 4;
+    const uint file_size = 14 + 12 + image->height * image->width * 3 + padding_size * image->height;
+    
+    // BMP File Header (14 bytes)
+    fputc('B', outfile);
+    fputc('M', outfile);
+    put_int(outfile, file_size);
+    put_int(outfile, 0);  // Reserved
+    put_int(outfile, 0x1A);  // Offset to pixel data
+    
+    // BMP Info Header (12 bytes - OS/2 V1 format)
+    put_int(outfile, 12);  // Header size
+    put_short(outfile, image->width);
+    put_short(outfile, image->height);
+    put_short(outfile, 1);  // Color planes
+    put_short(outfile, 24);  // Bits per pixel
+    
+    // Write pixel data (bottom to top, as BMP format requires)
+    // For now, we'll visualize the raw Y (luminance) DCT coefficients
+    // This will look blocky since we haven't done IDCT yet
+    for (int y = image->height - 1; y >= 0; --y) {
+        const uint block_row = y / 8;
+        const uint pixel_row = y % 8;
+        
+        for (uint x = 0; x < image->width; ++x) {
+            const uint block_column = x / 8;
+            const uint pixel_column = x % 8;
+            const uint block_index = block_row * image->block_width_real + block_column;
+            const uint pixel_index = pixel_row * 8 + pixel_column;
+            
+            // Get the Y (luminance) component
+            // Note: These are still DCT coefficients, not spatial pixels
+            // So the image will look very blocky and wrong until we do IDCT
+            int value = image->blocks[block_index].y[pixel_index];
+            
+            // Scale and clamp to visible range
+            // DC coefficient is typically much larger than AC
+            // We'll add 128 to center it and clamp
+            byte grayscale = clamp(value / 8 + 128);
+            
+            // Write BGR (BMP format is BGR, not RGB)
+            fputc(grayscale, outfile);  // Blue
+            fputc(grayscale, outfile);  // Green
+            fputc(grayscale, outfile);  // Red
+        }
+        
+        // Add padding
+        for (uint i = 0; i < padding_size; ++i) {
+            fputc(0, outfile);
+        }
+    }
+    
+    fclose(outfile);
+    printf("BMP file written successfully!\n");
+    printf("Note: Image shows raw DCT coefficients (not yet processed)\n");
+    printf("      It will look blocky/wrong until IDCT is applied.\n");
+}
+
+void write_bmp_dc_only(const Image* image, const char* filename) {
+    if (image == NULL || image->blocks == NULL) {
+        fprintf(stderr, "Error - Invalid image data\n");
+        return;
+    }
+    
+    printf("Writing DC-only BMP file: %s\n", filename);
+    
+    FILE* outfile = fopen(filename, "wb");
+    if (outfile == NULL) {
+        fprintf(stderr, "Error - Failed to open output file: %s\n", filename);
+        return;
+    }
+    
+    // For DC-only, we create a thumbnail at 1/8 resolution (one pixel per block)
+    const uint dc_width = image->block_width;
+    const uint dc_height = image->block_height;
+    const uint padding_size = dc_width % 4;
+    const uint file_size = 14 + 12 + dc_height * dc_width * 3 + padding_size * dc_height;
+    
+    // BMP File Header
+    fputc('B', outfile);
+    fputc('M', outfile);
+    put_int(outfile, file_size);
+    put_int(outfile, 0);
+    put_int(outfile, 0x1A);
+    
+    // BMP Info Header
+    put_int(outfile, 12);
+    put_short(outfile, dc_width);
+    put_short(outfile, dc_height);
+    put_short(outfile, 1);
+    put_short(outfile, 24);
+    
+    // Write DC coefficients only (one per block)
+    for (int y = dc_height - 1; y >= 0; --y) {
+        for (uint x = 0; x < dc_width; ++x) {
+            const uint block_index = y * image->block_width_real + x;
+            
+            // Get DC coefficient (index 0) from Y component
+            int dc_value = image->blocks[block_index].y[0];
+            
+            // Scale and clamp
+            byte grayscale = clamp(dc_value / 8 + 128);
+            
+            // Write BGR
+            fputc(grayscale, outfile);
+            fputc(grayscale, outfile);
+            fputc(grayscale, outfile);
+        }
+        
+        // Add padding
+        for (uint i = 0; i < padding_size; ++i) {
+            fputc(0, outfile);
+        }
+    }
+    
+    fclose(outfile);
+    printf("DC-only BMP written successfully!\n");
+    printf("This is a %ux%u thumbnail (1/8 resolution)\n", dc_width, dc_height);
+}
