@@ -158,8 +158,8 @@ void decode_huffman_data(Image* image, Bit_Reader* reader) {
     
     // Generate Huffman codes for all tables
     for (uint i = 0; i < 4; ++i) {
-        if (image->huffman_dc_table[i].is_set) {
-            generate_huffman_codes(&image->huffman_dc_table[i]);
+        if (image->huffman_dc_tables[i].is_set) {
+            generate_huffman_codes(&image->huffman_dc_tables[i]);
         }
         if (image->huffman_ac_tables[i].is_set) {
             generate_huffman_codes(&image->huffman_ac_tables[i]);
@@ -217,7 +217,7 @@ void decode_huffman_data(Image* image, Bit_Reader* reader) {
                                     block_component,
                                     &previous_dcs[i],
                                     &skips,
-                                    &image->huffman_dc_table[component->huffman_dc_table_id],
+                                    &image->huffman_dc_tables[component->huffman_dc_table_id],
                                     &image->huffman_ac_tables[component->huffman_ac_table_id])) {
                                 fprintf(stderr, "Error - Failed to decode block at (%u, %u)\n", x, y);
                                 image->valid = false;

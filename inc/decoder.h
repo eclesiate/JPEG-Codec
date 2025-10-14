@@ -20,7 +20,7 @@ void skip_APPN(FILE* jpeg);
 void read_quantization_table(Image* image, FILE* jpeg);
 
 // Print frame information
-void print_header(const Image* const image);
+void print_image(const Image* const image);
 
 // Read Start of Frame marker
 void read_sof_marker(Image* const image, FILE* jpeg);

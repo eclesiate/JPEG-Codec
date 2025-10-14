@@ -94,7 +94,7 @@ struct Image {
 
     Color_Component color_components[3];
     Quantization_Table quantization_tables [MAX_QUANTIZATION_TABLES];
-    Huffman_Table huffman_dc_table[MAX_HUFFMAN_TABLES]; // id can be between 0 and 3 for each table
+    Huffman_Table huffman_dc_tables[MAX_HUFFMAN_TABLES]; // id can be between 0 and 3 for each table
     Huffman_Table huffman_ac_tables[MAX_HUFFMAN_TABLES];
 };
 
