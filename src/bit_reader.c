@@ -22,7 +22,7 @@ uint read_word(Bit_Reader* reader) {
     uint low = fgetc(reader->file);
     return (high << 8) | low;
 }
-
+// Gpt generated to give next bit, respects big-endian and skips padding bits
 int read_bit(Bit_Reader* reader) {
     // If we're at the start of a new byte, read it
     if (reader->next_bit == 0) {
@@ -91,8 +91,4 @@ int read_bits(Bit_Reader* reader, uint length) {
     }
     
     return bits;
-}
-
-void align_reader(Bit_Reader* reader) {
-    reader->next_bit = 0;
 }

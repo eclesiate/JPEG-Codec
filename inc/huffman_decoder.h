@@ -4,26 +4,36 @@
 #include "jpeg.h"
 #include "bit_reader.h"
 
-// Generate Huffman codes from a Huffman table's symbol counts
+/// @brief 
+/// @param table 
 void generate_huffman_codes(Huffman_Table* table);
 
-// Get the next Huffman symbol from the bitstream
-// Returns -1 on error
+/// @brief get next huffman symbol from bistream
+/// @param reader 
+/// @param table 
+/// @return -1 on error
 int get_next_symbol(Bit_Reader* reader, const Huffman_Table* table);
 
-// Decode a single 8x8 block component (Y, Cb, or Cr)
-// Returns true on success, false on error
+
+/// @brief decode an 8x8 block component for y, cb, or cr
+/// @param image 
+/// @param reader 
+/// @param component 
+/// @param previous_dc 
+/// @param skips number of blocks to skip TODO implement for progressive
+/// @param dc_table 
+/// @param ac_table 
+/// @return true on success
 bool decode_block_component(
     const Image* image,
     Bit_Reader* reader,
-    int* component,           // Output: 64 DCT coefficients
-    int* previous_dc,         // Input/Output: Previous DC value for this component
-    uint* skips,              // Input/Output: Number of blocks to skip (progressive only)
+    int* component,          
+    int* previous_dc,        
     const Huffman_Table* dc_table,
     const Huffman_Table* ac_table
 );
 
-// Decode all Huffman data for the current scan
+// entry function to decode all huffman data
 void decode_huffman_data(Image* image, Bit_Reader* reader);
 
 #endif

@@ -15,14 +15,14 @@ Image* read_JPEG(const char* filename) {
 
     Image* image = calloc(1, sizeof(*image));
     if (image == NULL) {
-        fprintf(stderr, "Error: failed to allocate image\n");
+        fprintf(stderr, "Error: memory issue\n");
         fclose(jpeg);
         exit(1);
     }
     
     init_image(image);
     
-    // Read SOI marker
+    // Read Start of Image marker
     byte marker_FF = (byte) fgetc(jpeg);
     byte SOI_marker = (byte) fgetc(jpeg);
     if (marker_FF != 0xFF || SOI_marker != SOI) {
@@ -31,18 +31,19 @@ Image* read_JPEG(const char* filename) {
         free(image);
         exit(1);
     }
-
+    // * NOTE that jpeg files are big endian, so marker1 should always be FF and is the upper byte 
     byte marker1 = (byte) fgetc(jpeg);
     byte marker2 = (byte) fgetc(jpeg);
 
-    // Read all markers until SOS (Start of Scan)
+    // * Read all markers until SOS (Start of Scan) which means that the header info
+    // * section (quantization and huffman tables, etc) is finished and now reading pixel data
     while(image->valid) {
-        if (feof(jpeg)) {
-            fprintf(stderr, "Error: file ended prematurely\n");
-            image->valid = false;
-            fclose(jpeg);
-            return image;
-        }
+        // if (feof(jpeg)) {
+        //     fprintf(stderr, "Error: file ended prematurely\n");
+        //     image->valid = false;
+        //     fclose(jpeg);
+        //     return image;
+        // }
         
         // Ensure we have a valid marker (0xFF)
         while (marker1 != 0xFF && !feof(jpeg)) {
@@ -50,7 +51,7 @@ Image* read_JPEG(const char* filename) {
             marker2 = fgetc(jpeg);
         }
         
-        // Skip multiple 0xFF padding bytes
+        // Skip duplicate 0xFF padding bytes until we get to the actual marker
         while (marker2 == 0xFF && !feof(jpeg)) {
             marker2 = fgetc(jpeg);
         }
@@ -63,11 +64,11 @@ Image* read_JPEG(const char* filename) {
         }
 
         if (marker2 == SOF0) {
-            image->frame_type = SOF0;
+            image->is_progressive = false;
             read_sof_marker(image, jpeg);
         }
         else if (marker2 == SOF2) {
-            image->frame_type = SOF2;
+            image->is_progressive = true;
             read_sof_marker(image, jpeg);
         }
         else if (marker2 == DQT) {
@@ -79,21 +80,17 @@ Image* read_JPEG(const char* filename) {
         else if (marker2 == SOS) {
             break;
         }
+        // * restart intervals mean that for every N MCU blocks, the DC coeff restarts
+        // * accumulation (remember, DC coeffs are differences), contains bitstream errors
         else if (marker2 == DRI) {
             read_restart_interval(image, jpeg);
         }
         else if (marker2 >= APP0 && marker2 <= APP15) {
-            skip_APPN(jpeg);
-        }
-        else if (marker2 == COM) {
-            skip_comment(jpeg);
+            skip_unused_markers(jpeg, marker2);
         }
         else if ((marker2 >= JPG0 && marker2 <= JPG13) ||
-                 marker2 == DNL || marker2 == DHP || marker2 == EXP) {
-            skip_unused_markers(jpeg);
-        }
-        else if (marker2 == TEM) {
-            // TEM has no size
+                 marker2 == DNL || marker2 == DHP || marker2 == EXP || marker2 == COM) {
+            skip_unused_markers(jpeg, marker2);
         }
         else if (marker2 == 0xFF) {
             marker2 = fgetc(jpeg);
@@ -170,6 +167,8 @@ Image* read_JPEG(const char* filename) {
     return image;
 }
 
+// TODO implement decoding additional scans for progressive jpegs
+// at the moment, its just decoding one stream of huffman data
 void read_scans(Image* image, Bit_Reader* reader) {
     // Read first SOS marker and decode
     read_sos_marker(image, reader->file);
@@ -184,13 +183,13 @@ void read_scans(Image* image, Bit_Reader* reader) {
         return;
     }
     
-    // For progressive JPEGs, there may be additional scans
-    // For now, we only support baseline (single scan)
-    if (image->frame_type == SOF2) {
+    // TODO decode additional scans for progressive type
+    if (image->is_progressive) {
         fprintf(stderr, "Warning: Progressive JPEG - only first scan decoded\n");
     }
     
-    // Read until EOI
+    // * Since I've only implemented baseline jpegs, this should already be at EOI
+    // * and we can ignore the below code until i implement progressive jpeg decoding
     byte marker1 = fgetc(reader->file);
     byte marker2 = fgetc(reader->file);
     
@@ -222,21 +221,8 @@ void read_scans(Image* image, Bit_Reader* reader) {
             printf("Found EOI marker - decoding complete\n");
             break;
         }
-        // Progressive JPEGs may have additional DHT, SOS, DRI markers
-        else if (marker2 == DHT && image->frame_type == SOF2) {
-            read_huffman_table(image, reader->file);
-        }
-        else if (marker2 == SOS && image->frame_type == SOF2) {
-            // Additional scan - not implemented yet
-            fprintf(stderr, "Warning: Additional scan detected but not decoded\n");
-            break;
-        }
-        else if (marker2 == DRI && image->frame_type == SOF2) {
-            read_restart_interval(image, reader->file);
-        }
-        else if (marker2 >= RST0 && marker2 <= RST7) {
-            // Restart marker at end of scan - ignore
-        }
+        // TODO Progressive JPEGs may have additional DHT, SOS, DRI markers
+
         else {
             fprintf(stderr, "Error: invalid marker after scan: 0x%02x\n", marker2);
             image->valid = false;
@@ -276,7 +262,7 @@ void read_sos_marker(Image* const image, FILE* jpeg) {
     for (uint i = 0; i < image->components_in_scan; ++i) {
         byte component_id = fgetc(jpeg);
         
-        // Handle zero-based component IDs
+        // Handle zero-based component IDs defined from sof marker
         if (image->zero_based) {
             component_id += 1;
         }
@@ -317,16 +303,17 @@ void read_sos_marker(Image* const image, FILE* jpeg) {
             return;
         }
     }
-
-    // Read spectral selection and successive approximation
+    // TODO needed flags for progressive,
     image->start_of_selection = fgetc(jpeg);
     image->end_of_selection = fgetc(jpeg);
+    // TODO progressive info for how many scans we will need to send bits for
     byte successive_approx = fgetc(jpeg);
     image->successive_approx_high = successive_approx >> 4;
     image->successive_approx_low = successive_approx & 0x0F;
 
+    // gpt generated validation
     // Validate based on frame type
-    if (image->frame_type == SOF0) {
+    if (!image->is_progressive) {
         if (image->start_of_selection != 0 || image->end_of_selection != 63) {
             fprintf(stderr, "Error: invalid spectral selection for baseline JPEG\n");
             image->valid = false;
@@ -338,35 +325,9 @@ void read_sos_marker(Image* const image, FILE* jpeg) {
             return;
         }
     }
-    else if (image->frame_type == SOF2) {
-        if (image->start_of_selection > image->end_of_selection) {
-            fprintf(stderr, "Error: start of selection > end of selection\n");
-            image->valid = false;
-            return;
-        }
-        if (image->end_of_selection > 63) {
-            fprintf(stderr, "Error: end of selection > 63\n");
-            image->valid = false;
-            return;
-        }
-        if (image->start_of_selection == 0 && image->end_of_selection != 0) {
-            fprintf(stderr, "Error: spectral selection contains both DC and AC\n");
-            image->valid = false;
-            return;
-        }
-        if (image->start_of_selection != 0 && image->components_in_scan != 1) {
-            fprintf(stderr, "Error: AC scan must contain only 1 component\n");
-            image->valid = false;
-            return;
-        }
-        if (image->successive_approx_high != 0 &&
-            image->successive_approx_low != image->successive_approx_high - 1) {
-            fprintf(stderr, "Error: invalid successive approximation\n");
-            image->valid = false;
-            return;
-        }
-    }
+    // TODO verify progressive jpeg 
 
+    
     // Validate that all components in scan have necessary tables
     for (uint i = 0; i < image->num_components; ++i) {
         const Color_Component* component = &image->color_components[i];
@@ -400,22 +361,13 @@ void read_sos_marker(Image* const image, FILE* jpeg) {
     }
 }
 
-void skip_comment(FILE* jpeg) {
-    printf("Reading COM marker\n");
+/// @brief skip COM comment markers, APPN, etc
+/// @param jpeg 
+void skip_unused_markers(FILE* jpeg, byte marker) {
+    printf("Marker type: %c\n", marker);
     uint length = (fgetc(jpeg) << 8) | fgetc(jpeg);
     if (length < 2) {
-        fprintf(stderr, "Error: invalid comment length\n");
-        exit(1);
-    }
-    for (uint i = 0; i < length - 2; ++i) {
-        fgetc(jpeg);
-    }
-}
-
-void skip_unused_markers(FILE* jpeg) {
-    uint length = (fgetc(jpeg) << 8) | fgetc(jpeg);
-    if (length < 2) {
-        fprintf(stderr, "Error: invalid marker length\n");
+        fprintf(stderr, "Error: invalid marker length for marker: \n");
         exit(1);
     }
     for (uint i = 0; i < length - 2; ++i) {
@@ -454,41 +406,6 @@ void read_restart_interval(Image* const image, FILE* jpeg) {
     }
 }
 
-void read_next_marker(FILE* jpeg, byte* marker1, byte* marker2) {
-    int c;
-    
-    do {
-        c = fgetc(jpeg);
-        if (c == EOF) {
-            *marker1 = 0;
-            *marker2 = 0;
-            return;
-        }
-        *marker1 = (byte)c;
-    } while (*marker1 != 0xFF);
-
-    do {
-        c = fgetc(jpeg);
-        if (c == EOF) {
-            *marker1 = 0;
-            *marker2 = 0;
-            return;
-        }
-        *marker2 = (byte)c;
-    } while (*marker2 == 0xFF);
-}
-
-void skip_APPN(FILE* jpeg) {
-    printf("Reading APPN marker\n");
-    uint length = (fgetc(jpeg) << 8) | fgetc(jpeg);
-    if (length < 2) {
-        fprintf(stderr, "Error: invalid APPN length\n");
-        exit(1);
-    }
-    for (uint i = 0; i < length - 2; ++i) {
-        fgetc(jpeg);
-    }
-}
 
 void read_quantization_table(Image* image, FILE* jpeg) {
     printf("Reading DQT marker\n");
@@ -510,14 +427,20 @@ void read_quantization_table(Image* image, FILE* jpeg) {
         
         image->quantization_tables[table_id].valid = true;
 
-        if (table_precision != 0) {
+        if (table_precision != 0) { // 16 bit values per table entry
             for (uint i = 0; i < QUANTIZATION_TABLE_SZ; ++i) {
+                // decode by setting the zig zag ordering of indices
+                // recall that we use zig zag since since most of the energy is 
+                // contained in low-frequency coefficients, so we can obtain consecutive non
+                // zero coefficients before getting many 0s in a row, which allows
+                // for run length encoding (RLE) to efficiently happen before
+                // huffman coding
                 image->quantization_tables[table_id].table[zig_zag_map[i]] = 
                     (fgetc(jpeg) << 8) | fgetc(jpeg);
             }
             length -= 128;
         } 
-        else {
+        else { // normal 8 bit values per entry
             for (uint i = 0; i < QUANTIZATION_TABLE_SZ; ++i) {
                 image->quantization_tables[table_id].table[zig_zag_map[i]] = fgetc(jpeg);
             }
@@ -536,7 +459,7 @@ void print_image(const Image* const image) {
     if (image == NULL) return;
 
     printf("\nSOF============\n");
-    printf("Frame Type: 0x%02x\n", image->frame_type);
+    printf("Frame Type: 0x%02x\n", image->is_progressive);
     printf("Height: %d\n", image->height);
     printf("Width: %d\n", image->width);
     printf("Block Height: %d\n", image->block_height);
@@ -593,6 +516,9 @@ void print_image(const Image* const image) {
     printf("Restart Interval: %d\n", image->restart_interval);
 }
 
+// tells what color components are in use (grayscale or ycbcr), details hor and ver
+// sampling factors, image height and width, padded block heights and widths,
+// and assigns each color component to quantization table id.
 void read_sof_marker(Image* const image, FILE* jpeg) {
     printf("Reading SOF marker\n");
     if (image->num_components != 0) {
@@ -663,6 +589,8 @@ void read_sof_marker(Image* const image, FILE* jpeg) {
         }
         component->used_in_frame = true;
 
+        // * y sampling factors are the only ones to change, (0x2, 0x2) [0x22], means half resolution
+        // *  for vertical and horizontal chroma (2:1 ratio)
         byte sampling_factor = fgetc(jpeg);
         component->hor_sampling_factor = sampling_factor >> 4;
         component->ver_sampling_factor = sampling_factor & 0x0F;
@@ -675,7 +603,7 @@ void read_sof_marker(Image* const image, FILE* jpeg) {
                 return;
             }
             if (component->hor_sampling_factor == 2 && image->block_width % 2 == 1) {
-                image->block_width_real += 1;
+                image->block_width_real += 1; // * for padding with different sampling
             }
             if (component->ver_sampling_factor == 2 && image->block_height % 2 == 1) {
                 image->block_height_real += 1;
@@ -724,6 +652,7 @@ void read_huffman_table(Image* const image, FILE* jpeg) {
         }
 
         Huffman_Table* ht;
+        // each table is different for y, or chrominance, etc
         if (is_ac_table) {
             ht = &image->huffman_ac_tables[table_id];
         } else {
@@ -735,10 +664,10 @@ void read_huffman_table(Image* const image, FILE* jpeg) {
         uint all_symbols = 0;
         for (uint i = 1; i <= 16; i++) {
             all_symbols += fgetc(jpeg);
-            ht->offsets[i] = all_symbols;
+            ht->offsets[i] = all_symbols; // offset[i] denotes how many symbols of bit length <= i exist
         }
 
-        if (all_symbols > 176) {
+        if (all_symbols > 162) {
             fprintf(stderr, "Error: too many symbols in huffman table: %d\n", all_symbols);
             image->valid = false; 
             return;
@@ -748,7 +677,7 @@ void read_huffman_table(Image* const image, FILE* jpeg) {
             ht->symbols[i] = fgetc(jpeg);
         }
 
-        length -= 17 + all_symbols;
+        length -= 17 + all_symbols; // finished decoding huffman table i
     } 
     
     if (length != 0) {
@@ -759,7 +688,7 @@ void read_huffman_table(Image* const image, FILE* jpeg) {
  
 void init_image(Image* const image) {
     image->valid = true;
-    image->frame_type = 0;
+    image->is_progressive = 0;
     image->height = 0;
     image->width = 0;
     image->num_components = 0;
@@ -786,7 +715,7 @@ void init_image(Image* const image) {
 int main(int argc, char** argv) {
     if (argc < 2) {
         fprintf(stderr, "Error: not enough arguments\n");
-        fprintf(stderr, "Usage: %s <jpeg_file> [jpeg_file2 ...]\n", argv[0]);
+        fprintf(stderr, "Usage: %s <jpeg_file> (jpeg_file2 ...)\n", argv[0]);
         exit(1);
     }
     
@@ -800,11 +729,10 @@ int main(int argc, char** argv) {
         
         if (image->valid) {
             printf("\n======================================\n");
-            printf("Successfully decoded JPEG!\n");
-            printf("Decoded %d blocks\n", image->block_height_real * image->block_width_real);
+            printf("Finished decoding JPEG\n");
             printf("======================================\n\n");
             
-            // Generate output filename
+            // Generate output filename, chatgpt generated 
             const char* dot = strrchr(filename, '.');
             const char* slash = strrchr(filename, '/');
             if (slash == NULL) slash = filename - 1;
@@ -818,10 +746,10 @@ int main(int argc, char** argv) {
                 snprintf(outfilename, sizeof(outfilename), "%s_decoded.bmp", filename);
             }
             
-            // Write BMP file with raw DCT coefficients
+            // Write to BMP file with raw DCT coefficients
             write_bmp(image, outfilename);
             
-            // Also write DC-only thumbnail
+            // Also write DC coefficient only file
             char dc_filename[256];
             if (dot && dot > slash) {
                 size_t base_len = dot - filename;

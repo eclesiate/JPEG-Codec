@@ -3,6 +3,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+
+// * Pseudocode: https://en.wikipedia.org/wiki/Canonical_Huffman_code
+// Maitain huffman code property that longer codes (bit length) start with higher values
+// thus, e.g. no 3 bit code is a prefix to a 2 bit code (for lossless decompression)
+// NOTE that this saves storage in the jpeg file, since the computation of generating the huffman codes is done
+// on the client side, and we only need to store the number of codes, not their actual values in the file format.
 void generate_huffman_codes(Huffman_Table* table) {
     uint code = 0;
     for (uint i = 0; i < 16; ++i) {
@@ -10,14 +16,17 @@ void generate_huffman_codes(Huffman_Table* table) {
             table->codes[j] = code;
             code += 1;
         }
-        code <<= 1;
+        code <<= 1; 
     }
 }
-
+/// @brief loop through lookup tables and get the 
+/// @param reader 
+/// @param table 
+/// @return 
 int get_next_symbol(Bit_Reader* reader, const Huffman_Table* table) {
     uint current_code = 0;
     
-    // Try codes of increasing length (1-16 bits)
+    // This is kind of a tedious process, but its just a lookup through all the codes and returning the proper symbol
     for (uint i = 0; i < 16; ++i) {
         int bit = read_bit(reader);
         if (bit == -1) {
@@ -57,15 +66,13 @@ bool decode_block_component(
     Bit_Reader* reader,
     int* component,
     int* previous_dc,
-    uint* skips,
     const Huffman_Table* dc_table,
     const Huffman_Table* ac_table)
 {
     // Initialize component to all zeros
     memset(component, 0, 64 * sizeof(int));
     
-    if (image->frame_type == SOF0) {
-        // Baseline JPEG decoding
+    if (!image->is_progressive) {
         
         // Decode DC coefficient
         int length = get_next_symbol(reader, dc_table);
@@ -111,7 +118,7 @@ bool decode_block_component(
             byte num_zeroes = symbol >> 4;
             byte coeff_length = symbol & 0x0F;
             
-            // Special case: 0xF0 means 16 zeroes
+            // Special case: 0xF0 means 16 zeroes, skip
             if (symbol == 0xF0) {
                 i += 15;
                 continue;
@@ -146,8 +153,7 @@ bool decode_block_component(
         return true;
     }
     else {
-        // Progressive JPEG decoding (SOF2)
-        // This is complex - for now, we'll implement baseline only
+        // TODO  Progressive JPEG decoding 
         fprintf(stderr, "Error - Progressive JPEG decoding not yet implemented\n");
         return false;
     }
@@ -166,20 +172,19 @@ void decode_huffman_data(Image* image, Bit_Reader* reader) {
         }
     }
     
-    // Previous DC values for each component (Y, Cb, Cr)
+    // Previous DC values for each component y,cb,cr
     int previous_dcs[3] = {0, 0, 0};
-    uint skips = 0;
     
     // For baseline JPEG, all components are in the scan
     // For progressive, only some components may be present
-    const bool luminance_only = image->components_in_scan == 1 && 
+    bool luminance_only = image->components_in_scan == 1 && 
                                 image->color_components[0].used_in_scan;
     
-    const uint y_step = luminance_only ? 1 : image->vertical_sampling_factor;
-    const uint x_step = luminance_only ? 1 : image->horizontal_sampling_factor;
-    const uint restart_interval = image->restart_interval * x_step * y_step;
+    uint y_step = luminance_only ? 1 : image->vertical_sampling_factor;
+    uint x_step = luminance_only ? 1 : image->horizontal_sampling_factor;
+    uint restart_interval = image->restart_interval * x_step * y_step;
     
-    // Decode all MCUs (Minimum Coded Units)
+    // Decode all MCUs blocks (their dimensions depend on sampling, e.g. like with 4:2:2, theres a 2:1 ratio of Y to Chroma)
     for (uint y = 0; y < image->block_height; y += y_step) {
         for (uint x = 0; x < image->block_width; x += x_step) {
             // Handle restart intervals
@@ -188,8 +193,7 @@ void decode_huffman_data(Image* image, Bit_Reader* reader) {
                 previous_dcs[0] = 0;
                 previous_dcs[1] = 0;
                 previous_dcs[2] = 0;
-                skips = 0;
-                align_reader(reader);
+                reader->next_bit = 0;
             }
             
             // Decode each component in the scan
@@ -206,9 +210,12 @@ void decode_huffman_data(Image* image, Bit_Reader* reader) {
                             
                             int* block_component = NULL;
                             switch(i) {
-                                case 0: block_component = image->blocks[block_index].y; break;
-                                case 1: block_component = image->blocks[block_index].cb; break;
-                                case 2: block_component = image->blocks[block_index].cr; break;
+                                case 0: 
+                                    block_component = image->blocks[block_index].y; break;
+                                case 1: 
+                                    block_component = image->blocks[block_index].cb; break;
+                                case 2: 
+                                    block_component = image->blocks[block_index].cr; break;
                             }
                             
                             if (!decode_block_component(
@@ -216,9 +223,9 @@ void decode_huffman_data(Image* image, Bit_Reader* reader) {
                                     reader,
                                     block_component,
                                     &previous_dcs[i],
-                                    &skips,
                                     &image->huffman_dc_tables[component->huffman_dc_table_id],
                                     &image->huffman_ac_tables[component->huffman_ac_table_id])) {
+
                                 fprintf(stderr, "Error - Failed to decode block at (%u, %u)\n", x, y);
                                 image->valid = false;
                                 return;

@@ -21,7 +21,7 @@ bool has_bits(Bit_Reader* reader);
 // Read a single byte (aligned to byte boundary)
 byte read_byte(Bit_Reader* reader);
 
-// Read a 16-bit word (big-endian, aligned to byte boundary)
+// Read a 16-bit word (in big endian, and aligned to byte boundary)
 uint read_word(Bit_Reader* reader);
 
 // Read a single bit (0 or 1), returns -1 on error/EOF
