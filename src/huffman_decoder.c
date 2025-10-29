@@ -2,7 +2,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
+/*
+Note that jpeg uses canonical huffman decoding instead of huffman trees to save space
+*/
 
 // * Pseudocode: https://en.wikipedia.org/wiki/Canonical_Huffman_code
 // Maitain huffman code property that longer codes (bit length) start with higher values
@@ -19,14 +21,15 @@ void generate_huffman_codes(Huffman_Table* table) {
         code <<= 1; 
     }
 }
-/// @brief loop through lookup tables and get the 
+/// @brief loop through lookup tables and get the appropriate symbol
 /// @param reader 
 /// @param table 
 /// @return 
 int get_next_symbol(Bit_Reader* reader, const Huffman_Table* table) {
     uint current_code = 0;
     
-    // This is kind of a tedious process, but its just a lookup through all the codes and returning the proper symbol
+    // TODO This is kind of a tedious process, and maybe i can improve the speed by calculating by calculating bit length immediately, or some larger lookup table for smaller codes
+    // but for now  its just a lookup through all the codes and returning the proper symbol
     for (uint i = 0; i < 16; ++i) {
         int bit = read_bit(reader);
         if (bit == -1) {
@@ -92,16 +95,17 @@ bool decode_block_component(
                 fprintf(stderr, "Error - Invalid DC value\n");
                 return false;
             }
-            // If high bit is 0, value is negative
+            // * Jpeg doesn't store this in 2s complement, so you got to do conversion according to jpeg standard
+            // If MSB is 0, value is negative
             if (coeff < (1 << (length - 1))) {
-                coeff -= (1 << length) - 1;
+                coeff -= (1 << length) - 1; // True value = bits - (2^length - 1) 
             }
         }
         
         component[0] = coeff + *previous_dc;
         *previous_dc = component[0];
         
-        // Decode AC coefficients
+        // Decode all AC coeffs
         for (uint i = 1; i < 64; ++i) {
             int symbol = get_next_symbol(reader, ac_table);
             if (symbol == -1) {
@@ -109,12 +113,12 @@ bool decode_block_component(
                 return false;
             }
             
-            // Symbol 0x00 means rest of block is zero
+            // 0x00 means rest of block is zero
             if (symbol == 0x00) {
                 return true;
             }
             
-            // Extract run-length and coefficient length
+            // Extract run length and coeff bit length
             byte num_zeroes = symbol >> 4;
             byte coeff_length = symbol & 0x0F;
             
@@ -142,11 +146,10 @@ bool decode_block_component(
                 return false;
             }
             
-            // If high bit is 0, value is negative
             if (coeff < (1 << (coeff_length - 1))) {
                 coeff -= (1 << coeff_length) - 1;
             }
-            
+            // * Recall that we have to convert the order from zigzag to natural order when decoding
             component[zig_zag_map[i]] = coeff;
         }
         
@@ -177,35 +180,40 @@ void decode_huffman_data(Image* image, Bit_Reader* reader) {
     
     // For baseline JPEG, all components are in the scan
     // For progressive, only some components may be present
-    bool luminance_only = image->components_in_scan == 1 && 
-                                image->color_components[0].used_in_scan;
+    bool luminance_only = image->components_in_scan == 1 && image->color_components[0].used_in_scan; // Also for grayscale images
     
     uint y_step = luminance_only ? 1 : image->vertical_sampling_factor;
     uint x_step = luminance_only ? 1 : image->horizontal_sampling_factor;
-    uint restart_interval = image->restart_interval * x_step * y_step;
+    // Blocks between restart
+    uint restart_interval = image->restart_interval * x_step * y_step; 
     
-    // Decode all MCUs blocks (their dimensions depend on sampling, e.g. like with 4:2:2, theres a 2:1 ratio of Y to Chroma)
+    // Decode all MCUs blocks (their dimensions depend on sampling, e.g. like with 4:2:2, there's a 2x2 block for Y and 1 block for each chroma)
+    // iterate through rows
     for (uint y = 0; y < image->block_height; y += y_step) {
+        // iterate through block columns
         for (uint x = 0; x < image->block_width; x += x_step) {
             // Handle restart intervals
-            if (restart_interval != 0 && 
-                (y * image->block_width_real + x) % restart_interval == 0) {
+            if (restart_interval != 0 && (y * image->block_width_real + x) % restart_interval == 0) {
                 previous_dcs[0] = 0;
                 previous_dcs[1] = 0;
                 previous_dcs[2] = 0;
                 reader->next_bit = 0;
             }
             
-            // Decode each component in the scan
+            // Decode each component for every MCU
             for (uint i = 0; i < image->num_components; ++i) {
-                const Color_Component* component = &image->color_components[i];
+                Color_Component* component = &image->color_components[i];
                 
                 if (component->used_in_scan) {
-                    const uint v_max = luminance_only ? 1 : component->ver_sampling_factor;
-                    const uint h_max = luminance_only ? 1 : component->hor_sampling_factor;
+                    // * depending on sampling factor we have to decode v_max by h_max blocks per MCU
+                    // or for grayscale image
+                    uint v_max = luminance_only ? 1 : component->ver_sampling_factor;
+                    uint h_max = luminance_only ? 1 : component->hor_sampling_factor;
                     
                     for (uint v = 0; v < v_max; ++v) {
                         for (uint h = 0; h < h_max; ++h) {
+                            // * convert 2d MCU coordinates into 1d array index
+                            // * = (current row * row width) + current column
                             uint block_index = (y + v) * image->block_width_real + (x + h);
                             
                             int* block_component = NULL;
